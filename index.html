@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <title>ALLP005 / ALLP008 Giriş</title>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 body{font-family:Segoe UI,Arial,sans-serif;font-size:13px;margin:16px;background:#f5f6f8}
 h2{margin:0 0 10px}
@@ -11,7 +10,6 @@ h2{margin:0 0 10px}
 button,.file{padding:6px 12px;border:1px solid #888;border-radius:4px;background:#fff;cursor:pointer}
 button.p{background:#1f5fa8;color:#fff;border-color:#1f5fa8}
 .file input{display:none}
-.file.x{background:#e8f3e8;border-color:#4a8a4a}
 .tabs{display:flex;gap:4px;margin:6px 0 0}
 .tabs button{border-radius:6px 6px 0 0;border-bottom:none;background:#dde3ea;font-weight:600}
 .tabs button.on{background:#fff}
@@ -27,7 +25,6 @@ input.t{width:120px} input.d{width:280px} input.n{width:70px} input.s{width:80px
 select{max-width:210px}
 .err{background:#ffd6d6!important;border-color:#d00!important}
 .req{color:#c00}
-.ok{color:#2a6a2a;margin-top:8px;white-space:pre-line}
 .msg{color:#c00;margin-top:8px;white-space:pre-line}
 #info{color:#555}
 </style>
@@ -36,7 +33,7 @@ select{max-width:210px}
 <h2>WMS Sağlık – DTR Giriş (ALLP005 / ALLP008)</h2>
 <div class="bar">
  <label class="file">Lookup dosyasını yükle<input type="file" id="lf" accept=".csv,.txt"></label>
- <span id="info">Listeler yüklenmedi.</span>
+ <span id="info">Listeler yükleniyor...</span>
  <label style="margin-left:20px">ORG_CODE (Proje): <select id="org"></select></label>
 </div>
 <div class="tabs">
@@ -45,8 +42,6 @@ select{max-width:210px}
 </div>
 <div class="pane on" id="pane_p5">
  <div class="bar">
-  <label class="file x" title="Başlıklı Excel/CSV: ARTICLE_CODE, ARTICLE_DESCRIPTION, GTIN, MIAD_CHECK, SHELF_LIFE">Excel'den ürün yükle<input type="file" accept=".xlsx,.xls,.csv,.txt" onchange="importExcel('p5',this)"></label>
-  <button onclick="applyFirst('p5')">İlk satırı tüm satırlara uygula</button>
   <button onclick="addRow('p5')">+ Satır ekle</button>
   <button onclick="copyLast('p5')">Son satırı kopyala</button>
   <button class="p" onclick="download('p5','xls')">Excel indir</button>
@@ -54,13 +49,10 @@ select{max-width:210px}
   <span id="cnt_p5"></span>
  </div>
  <div class="wrap"><table><thead><tr id="hd_p5"></tr></thead><tbody id="tb_p5"></tbody></table></div>
- <div class="ok" id="ok_p5"></div>
  <div class="msg" id="msg_p5"></div>
 </div>
 <div class="pane" id="pane_p8">
  <div class="bar">
-  <label class="file x" title="Başlıklı Excel/CSV: ARTICLE_CODE ve GTIN okunur (GTIN → BARCODE_GTIN)">Excel'den ürün yükle<input type="file" accept=".xlsx,.xls,.csv,.txt" onchange="importExcel('p8',this)"></label>
-  <button onclick="applyFirst('p8')">İlk satırı tüm satırlara uygula</button>
   <button onclick="addRow('p8')">+ Satır ekle</button>
   <button onclick="copyLast('p8')">Son satırı kopyala</button>
   <button onclick="importFrom5()">ALLP005'ten ürünleri getir</button>
@@ -69,20 +61,19 @@ select{max-width:210px}
   <span id="cnt_p8"></span>
  </div>
  <div class="wrap"><table><thead><tr id="hd_p8"></tr></thead><tbody id="tb_p8"></tbody></table></div>
- <div class="ok" id="ok_p8"></div>
  <div class="msg" id="msg_p8"></div>
 </div>
 <script>
 const KEY="allp005_lookup_v1";
+const DEFAULT_CSV="YS19_Lookup_Listeleri.csv"; // GitHub'daki dosya adı ile birebir aynı olmalı
+
 // Sabit listeler (lookup dosyasından gelmez)
 const PTS=[["0","ÜTS Dışı"],["1","Lotlu Ürün"],["2","Serili Ürün"]];
 const DDO=[["0","Karekodsuz"],["1","Karekodlu"]];
 let DATA={};
-// h: dosyaya yazılan başlık, tr: ekranda görünen Türkçe açıklama, note: ek açıklama, fix: sabit liste
-// xl: Excel'den ürün yüklemede okunan kolon -> ekrandaki alan
+
 const T={
- p5:{name:"ALLP005",uniq:["ARTICLE_CODE"],clear:["ARTICLE_CODE","ARTICLE_DESCRIPTION","OLD_ARTICLE_CODE","GTIN"],
-  xl:{ARTICLE_CODE:"ARTICLE_CODE",ARTICLE_DESCRIPTION:"ARTICLE_DESCRIPTION",GTIN:"GTIN",MIAD_CHECK:"MIAD_CHECK",SHELF_LIFE:"SHELF_LIFE"},cols:[
+ p5:{name:"ALLP005",uniq:["ARTICLE_CODE"],clear:["ARTICLE_CODE","ARTICLE_DESCRIPTION","OLD_ARTICLE_CODE","GTIN"],cols:[
   {k:"ARTICLE_CODE",h:"ARTICLE_CODE",tr:"Ürün Kodu",t:"text",c:"t",req:1,max:40},
   {k:"ARTICLE_DESCRIPTION",h:"ARTICLE_DESCRIPTION",tr:"Ürün Tanımı",t:"text",c:"d",req:1,max:60},
   {k:"OLD_ARTICLE_CODE",h:"OLD_ARTICLE_CODE",tr:"Eski Ürün Kodu",t:"text",c:"t",max:40},
@@ -103,8 +94,7 @@ const T={
   {k:"UOM",h:"UOM",tr:"Temel Birim (Satınalma / Satış)",t:"sel"},
   {k:"MODEL_TYPE",h:"MODEL_TYPE",tr:"Model Tipi",t:"sel"}]},
  p8:{name:"ALLP008",uniq:["ARTICLE_CODE","UOM"],
-  clear:["UOM","QUANTITY","EAN","BARCODE_GTIN","LOT1","LOT2","LENGTH","WIDTH","HEIGHT","WEIGHT"],
-  xl:{ARTICLE_CODE:"ARTICLE_CODE",GTIN:"BARCODE_GTIN"},cols:[
+  clear:["UOM","QUANTITY","EAN","BARCODE_GTIN","LOT1","LOT2","LENGTH","WIDTH","HEIGHT","WEIGHT"],cols:[
   {k:"ARTICLE_CODE",h:"ARTICLE_CODE",tr:"Ürün Kodu",t:"text",c:"t",req:1,max:40},
   {k:"UOM",h:"UOM",tr:"Ölçü Birimi (Adet / Koli / Palet…)",t:"sel",req:1},
   {k:"QUANTITY",h:"QUANTITY",tr:"Birimdeki Adet",t:"dec",c:"n",req:1},
@@ -145,6 +135,7 @@ function parseCSV(t){
   else if(ch!="\r")f+=ch;}
  if(f!==""||row.length){row.push(f);rows.push(row);}
  return rows;}
+
 function build(rows){
  const h=rows[0].map(x=>x.trim().toUpperCase());
  const iO=h.indexOf("ORG_CODE"),iL=h.indexOf("LISTE"),iK=h.indexOf("KOD"),iA=h.indexOf("ACIKLAMA");
@@ -160,12 +151,36 @@ function build(rows){
  Object.values(D).forEach(x=>{const s=x.SEVKONCELIK||[],seen=new Set(s.map(v=>v[0]));
   gen.forEach(v=>{if(!seen.has(v[0])){s.push(v);seen.add(v[0]);}});x.SEVKONCELIK=s;});
  return D;}
+
 function applyData(D,stamp){
  DATA=D;const cur=orgSel.value;orgSel.innerHTML="";
  Object.keys(D).sort().forEach(o=>orgSel.add(new Option(o+" - "+D[o].name,o)));
  if(cur&&D[cur])orgSel.value=cur;
  info.textContent=`Listeler yüklü: ${Object.keys(D).length} proje (${stamp})`;
  orgSel.onchange();}
+
+// Sayfa açıldığında GitHub'daki CSV dosyasını otomatik çekme fonksiyonu
+async function loadDefaultCSV(){
+ try{
+  const res=await fetch(DEFAULT_CSV+"?t="+Date.now());
+  if(!res.ok)throw new Error("Dosya sunucuda bulunamadı");
+  const buf=await res.arrayBuffer();
+  let txt=new TextDecoder("utf-8").decode(buf);
+  if(txt.includes("\ufffd"))txt=new TextDecoder("windows-1254").decode(buf);
+  const D=build(parseCSV(txt));
+  const stamp=DEFAULT_CSV+" – Otomatik Yüklendi";
+  localStorage.setItem(KEY,JSON.stringify({D,stamp}));
+  applyData(D,stamp);
+ }catch(e){
+  // Otomatik dosya bulunamazsa tarayıcı hafızasındaki (varsa) eski veriyi kullan
+  try{
+   const s=JSON.parse(localStorage.getItem(KEY)||"null");
+   if(s){applyData(s.D,s.stamp);return;}
+  }catch(err){}
+  info.textContent="Listeler yüklenmedi. Lütfen CSV dosyasını seçin.";
+ }
+}
+
 $("lf").onchange=e=>{
  const file=e.target.files[0];if(!file)return;
  const read=enc=>new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsText(file,enc);});
@@ -202,55 +217,12 @@ function importFrom5(){
 orgSel.onchange=()=>{["p5","p8"].forEach(t=>[...tb(t).rows].forEach(tr=>{const v=getVals(tr);
  tr.querySelectorAll("select[data-k]").forEach(s=>{s.innerHTML=opts(T[t].cols.find(x=>x.k===s.dataset.k));});setVals(tr,v);}));};
 
-/* ---- Excel'den ürün yükleme ---- */
-async function readSheet(file){
- if(/\.(csv|txt)$/i.test(file.name)){
-  const read=enc=>new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsText(file,enc);});
-  let t=await read("utf-8");if(t.includes("\ufffd"))t=await read("windows-1254");return parseCSV(t);}
- if(typeof XLSX==="undefined")throw "Excel okuyucu yüklenemedi (internet bağlantısı gerekli). Dosyayı Excel'de CSV olarak kaydedip yükleyin.";
- const wb=XLSX.read(await file.arrayBuffer(),{type:"array"}),ws=wb.Sheets[wb.SheetNames[0]];
- return XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:""})
-  .map(r=>r.map(x=>typeof x==="number"?(Number.isInteger(x)?x.toFixed(0):String(x)):String(x)));}
-async function importExcel(t,inp){const file=inp.files[0];inp.value="";if(!file)return;
- const m=$("msg_"+t),ok=$("ok_"+t);m.textContent="";ok.textContent="";
- let rows;try{rows=await readSheet(file);}catch(e){m.textContent=String(e);return;}
- rows=rows.filter(r=>r.some(x=>String(x).trim()!==""));
- if(rows.length<2){m.textContent="Dosyada başlık satırı ve en az bir ürün satırı olmalı.";return;}
- const h=rows[0].map(x=>String(x).trim().toUpperCase()),map=T[t].xl,idx={};
- Object.keys(map).forEach(x=>idx[x]=h.indexOf(x));
- if(idx.ARTICLE_CODE<0){m.textContent="Dosyanın başlık satırında ARTICLE_CODE kolonu bulunamadı.";return;}
- const miss=Object.keys(map).filter(x=>idx[x]<0);
- const ex={};
- [...tb(t).rows].forEach(tr=>{if(isEmpty(tr)){tr.remove();return;}const c=getVals(tr).ARTICLE_CODE.trim();if(c&&!ex[c])ex[c]=tr;});
- const seen=new Set(),dup=[];let add=0,upd=0;
- rows.slice(1).forEach((r,i)=>{const code=String(r[idx.ARTICLE_CODE]||"").trim();if(!code)return;
-  if(seen.has(code)){dup.push(code+" (dosya satırı "+(i+2)+")");return;}seen.add(code);
-  const v={};Object.entries(map).forEach(([x,k])=>{if(idx[x]>=0)v[k]=String(r[idx[x]]??"").trim().replace(/[|\r\n\t]/g," ");});
-  if(ex[code]){setVals(ex[code],v);upd++;}else{addRow(t,v);add++;}});
- renum(t);
- ok.textContent=`${file.name}: ${add} ürün eklendi, ${upd} ürün güncellendi.`
-  +(miss.length?` Dosyada bulunmayan kolonlar: ${miss.join(", ")}.`:"")
-  +` Diğer alanları ilk satırda doldurup "İlk satırı tüm satırlara uygula"ya basın.`;
- if(dup.length)m.textContent="Dosyada tekrar eden ürün kodları (ilk geçen satır alındı):\n"+dup.slice(0,20).join("\n")+(dup.length>20?`\n… ve ${dup.length-20} satır daha`:"");}
-function applyFirst(t){const rows=[...tb(t).rows].filter(tr=>!isEmpty(tr)),m=$("msg_"+t),ok=$("ok_"+t);
- m.textContent="";ok.textContent="";
- if(rows.length<2){m.textContent="Uygulamak için en az iki dolu satır olmalı.";return;}
- const skip=new Set(["ARTICLE_CODE",...Object.values(T[t].xl)]),v0=getVals(rows[0]),v={};
- T[t].cols.forEach(c=>{if(!skip.has(c.k)&&v0[c.k]!=="")v[c.k]=v0[c.k];});
- const ks=Object.keys(v);
- if(!ks.length){m.textContent="İlk satırda kopyalanacak alan yok. Ürün kodu ve Excel'den gelen alanlar dışındaki alanları ilk satırda doldurun.";return;}
- const names=ks.map(k=>T[t].cols.find(c=>c.k===k).tr).join(", ");
- if(!confirm(`İlk satırdaki ${ks.length} alan (${names}) diğer ${rows.length-1} satıra yazılsın mı?\nBu satırlardaki mevcut değerlerin üstüne yazılır.`))return;
- rows.slice(1).forEach(tr=>setVals(tr,v));
- ok.textContent=`${ks.length} alan ${rows.length-1} satıra kopyalandı (${names}). İlk satırda boş olan alanlar değiştirilmedi.`;}
-
 function collect(t){const out=[],errs=[],seen={},cols=T[t].cols;
  [...tb(t).rows].forEach((tr,i)=>{tr.querySelectorAll(".err").forEach(e=>e.classList.remove("err"));
   if(isEmpty(tr))return;const v=getVals(tr);
   cols.forEach(c=>{const e=tr.querySelector(`[data-k="${c.k}"]`);let x=v[c.k];const nm=c.tr+" ("+c.h+")";
    if(c.t!=="sel"){x=x.trim().replace(/[|\r\n\t]/g," ");v[c.k]=x;}
    if(c.req&&x===""){e.classList.add("err");errs.push(`Satır ${i+1}: ${nm} zorunlu`);}
-   if(c.max&&x.length>c.max){e.classList.add("err");errs.push(`Satır ${i+1}: ${nm} en çok ${c.max} karakter (şu an ${x.length})`);}
    if(c.t==="num"&&x&&!/^\d+$/.test(x)){e.classList.add("err");errs.push(`Satır ${i+1}: ${nm} yalnız tam sayı olmalı`);}
    if(c.t==="dec"&&x){const re=c.dp?new RegExp("^\\d+(\\.\\d{1,"+c.dp+"})?$"):/^\d+(\.\d+)?$/;
     if(!re.test(x)){e.classList.add("err");errs.push(`Satır ${i+1}: ${nm} sayı olmalı (ondalık ayıraç nokta${c.dp?", en çok "+c.dp+" ondalık":""})`);}}});
@@ -279,7 +251,9 @@ function download(t,fmt){const m=$("msg_"+t);
 ["p5","p8"].forEach(t=>{$("hd_"+t).innerHTML="<th>#</th>"+T[t].cols.map(c=>
  `<th title="${esc(tip(c))}">${esc(c.h)}${c.req?' <span class="req">*</span>':''}<span class="tr">${esc(c.tr)}</span></th>`).join("")+"<th></th>";
  for(let i=0;i<5;i++)addRow(t);});
-try{const s=JSON.parse(localStorage.getItem(KEY)||"null");if(s)applyData(s.D,s.stamp);}catch(e){}
+
+// Sayfa yüklenince otomatik olarak CSV dosyasını çek
+loadDefaultCSV();
 </script>
 </body>
 </html>
