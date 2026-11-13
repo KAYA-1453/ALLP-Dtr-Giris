@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>ALLP005 / ALLP008 Giriş</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+body{font-family:Segoe UI,Arial,sans-serif;font-size:13px;margin:16px;background:#f5f6f8}
+h2{margin:0 0 10px}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+button,.file{padding:6px 12px;border:1px solid #888;border-radius:4px;background:#fff;cursor:pointer}
+button.p{background:#1f5fa8;color:#fff;border-color:#1f5fa8}
+.file input{display:none}
+.file.x{background:#e8f3e8;border-color:#4a8a4a}
+.tabs{display:flex;gap:4px;margin:6px 0 0}
+.tabs button{border-radius:6px 6px 0 0;border-bottom:none;background:#dde3ea;font-weight:600}
+.tabs button.on{background:#fff}
+.pane{display:none;background:#fff;border:1px solid #ccc;padding:10px}
+.pane.on{display:block}
+.wrap{overflow:auto;max-height:65vh;border:1px solid #ccc}
+table{border-collapse:collapse;white-space:nowrap}
+th{position:sticky;top:0;background:#e9edf3;padding:6px;border:1px solid #ccc;font-weight:600;z-index:1;cursor:help;vertical-align:top}
+th .tr{display:block;font-weight:400;color:#555;font-size:11px;margin-top:2px}
+td{border:1px solid #ddd;padding:2px}
+input,select{font-size:12px;padding:3px;border:1px solid #bbb;border-radius:3px}
+input.t{width:120px} input.d{width:280px} input.n{width:70px} input.s{width:80px}
+select{max-width:210px}
+.err{background:#ffd6d6!important;border-color:#d00!important}
+.req{color:#c00}
+.ok{color:#2a6a2a;margin-top:8px;white-space:pre-line}
+.msg{color:#c00;margin-top:8px;white-space:pre-line}
+#info{color:#555}
+</style>
+</head>
+<body>
+<h2>WMS Sağlık – DTR Giriş (ALLP005 / ALLP008)</h2>
+<div class="bar">
+ <label class="file">Lookup dosyasını yükle<input type="file" id="lf" accept=".csv,.txt"></label>
+ <span id="info">Listeler yüklenmedi.</span>
+ <label style="margin-left:20px">ORG_CODE (Proje): <select id="org"></select></label>
+</div>
+<div class="tabs">
+ <button id="tab_p5" class="on" onclick="showTab('p5')">ALLP005 – Artikel Master (Ürün Kartı)</button>
+ <button id="tab_p8" onclick="showTab('p8')">ALLP008 – Ölçüler (Birim / Barkod / Boyut)</button>
+</div>
+<div class="pane on" id="pane_p5">
+ <div class="bar">
+  <label class="file x" title="Başlıklı Excel/CSV: ARTICLE_CODE, ARTICLE_DESCRIPTION, GTIN, MIAD_CHECK, SHELF_LIFE">Excel'den ürün yükle<input type="file" accept=".xlsx,.xls,.csv,.txt" onchange="importExcel('p5',this)"></label>
+  <button onclick="applyFirst('p5')">İlk satırı tüm satırlara uygula</button>
+  <button onclick="addRow('p5')">+ Satır ekle</button>
+  <button onclick="copyLast('p5')">Son satırı kopyala</button>
+  <button class="p" onclick="download('p5','xls')">Excel indir</button>
+  <button class="p" onclick="download('p5','csv')">CSV indir</button>
+  <span id="cnt_p5"></span>
+ </div>
+ <div class="wrap"><table><thead><tr id="hd_p5"></tr></thead><tbody id="tb_p5"></tbody></table></div>
+ <div class="ok" id="ok_p5"></div>
+ <div class="msg" id="msg_p5"></div>
+</div>
+<div class="pane" id="pane_p8">
+ <div class="bar">
+  <label class="file x" title="Başlıklı Excel/CSV: ARTICLE_CODE ve GTIN okunur (GTIN → BARCODE_GTIN)">Excel'den ürün yükle<input type="file" accept=".xlsx,.xls,.csv,.txt" onchange="importExcel('p8',this)"></label>
+  <button onclick="applyFirst('p8')">İlk satırı tüm satırlara uygula</button>
+  <button onclick="addRow('p8')">+ Satır ekle</button>
+  <button onclick="copyLast('p8')">Son satırı kopyala</button>
+  <button onclick="importFrom5()">ALLP005'ten ürünleri getir</button>
+  <button class="p" onclick="download('p8','xls')">Excel indir</button>
+  <button class="p" onclick="download('p8','csv')">CSV indir</button>
+  <span id="cnt_p8"></span>
+ </div>
+ <div class="wrap"><table><thead><tr id="hd_p8"></tr></thead><tbody id="tb_p8"></tbody></table></div>
+ <div class="ok" id="ok_p8"></div>
+ <div class="msg" id="msg_p8"></div>
+</div>
+<script>
+const KEY="allp005_lookup_v1";
+// Sabit listeler (lookup dosyasından gelmez)
+const PTS=[["0","ÜTS Dışı"],["1","Lotlu Ürün"],["2","Serili Ürün"]];
+const DDO=[["0","Karekodsuz"],["1","Karekodlu"]];
+let DATA={};
+// h: dosyaya yazılan başlık, tr: ekranda görünen Türkçe açıklama, note: ek açıklama, fix: sabit liste
+// xl: Excel'den ürün yüklemede okunan kolon -> ekrandaki alan
+const T={
+ p5:{name:"ALLP005",uniq:["ARTICLE_CODE"],clear:["ARTICLE_CODE","ARTICLE_DESCRIPTION","OLD_ARTICLE_CODE","GTIN"],
+  xl:{ARTICLE_CODE:"ARTICLE_CODE",ARTICLE_DESCRIPTION:"ARTICLE_DESCRIPTION",GTIN:"GTIN",MIAD_CHECK:"MIAD_CHECK",SHELF_LIFE:"SHELF_LIFE"},cols:[
+  {k:"ARTICLE_CODE",h:"ARTICLE_CODE",tr:"Ürün Kodu",t:"text",c:"t",req:1,max:40},
+  {k:"ARTICLE_DESCRIPTION",h:"ARTICLE_DESCRIPTION",tr:"Ürün Tanımı",t:"text",c:"d",req:1,max:60},
+  {k:"OLD_ARTICLE_CODE",h:"OLD_ARTICLE_CODE",tr:"Eski Ürün Kodu",t:"text",c:"t",max:40},
+  {k:"GTIN",h:"GTIN",tr:"Ürün Barkodu (GTIN)",t:"text",c:"t",max:40},
+  {k:"SEVKONCELIK",h:"SEVKONCELIK",tr:"Sevk Önceliği",t:"sel"},
+  {k:"ARTICLE_GROUP",h:"ARTICLE_GROUP",tr:"Ürün Grubu",t:"sel"},
+  {k:"ARTICLE_TYPE",h:"ARTICLE_TYPE",tr:"Ürün Tipi",t:"sel"},
+  {k:"ARTICLE_CATEGORY",h:"ARTICLE_CATEGORY",tr:"Ürün Kategorisi",t:"sel"},
+  {k:"PACKAGING_GROUP",h:"PACKAGING_GROUP",tr:"Paketleme Grubu",t:"sel"},
+  {k:"MIAD_CHECK",h:"MIAD_CHECK",tr:"Miat Kontrolü (gün)",note:"Gün sayısı olarak girilir",t:"num",c:"n"},
+  {k:"SHELF_LIFE",h:"SHELF_LIFE",tr:"Raf Ömrü (gün)",note:"Gün sayısı olarak girilir",t:"num",c:"n"},
+  {k:"VAS_OPER",h:"2D İŞLEMİ",tr:"2D İşlem Kodu (VAS_OPER)",t:"sel"},
+  {k:"PTS_TYPE",h:"ÜTS İşlem Tipi",tr:"ÜTS Dışı / Lotlu / Serili (PTS_TYPE)",t:"sel",fix:PTS},
+  {k:"PROJ_ID",h:"Proj Id",tr:"Proje Kodu (PROJ_ID)",t:"sel"},
+  {k:"COUNTRY_PURCHASE",h:"Satınalma Ülkesi",tr:"Satın Alındığı Ülke (COUNTRY_PURCHASE)",t:"sel",l:"COUNTRY"},
+  {k:"COUNTRY_IMPORT",h:"Menşei Ülkesi",tr:"Üretildiği Ülke (COUNTRY_IMPORT)",t:"sel",l:"COUNTRY"},
+  {k:"DD_OPER",h:"DD_OPER",tr:"Karekod Durumu",note:"0 Karekodsuz, 1 Karekodlu",t:"sel",fix:DDO},
+  {k:"UOM",h:"UOM",tr:"Temel Birim (Satınalma / Satış)",t:"sel"},
+  {k:"MODEL_TYPE",h:"MODEL_TYPE",tr:"Model Tipi",t:"sel"}]},
+ p8:{name:"ALLP008",uniq:["ARTICLE_CODE","UOM"],
+  clear:["UOM","QUANTITY","EAN","BARCODE_GTIN","LOT1","LOT2","LENGTH","WIDTH","HEIGHT","WEIGHT"],
+  xl:{ARTICLE_CODE:"ARTICLE_CODE",GTIN:"BARCODE_GTIN"},cols:[
+  {k:"ARTICLE_CODE",h:"ARTICLE_CODE",tr:"Ürün Kodu",t:"text",c:"t",req:1,max:40},
+  {k:"UOM",h:"UOM",tr:"Ölçü Birimi (Adet / Koli / Palet…)",t:"sel",req:1},
+  {k:"QUANTITY",h:"QUANTITY",tr:"Birimdeki Adet",t:"dec",c:"n",req:1},
+  {k:"EAN",h:"EAN",tr:"Birim Barkodu",t:"text",c:"t",max:40},
+  {k:"BARCODE_GTIN",h:"BARCODE_GTIN",tr:"GTIN Barkodu",t:"text",c:"t",max:50},
+  {k:"LOT1",h:"LOT1",tr:"Lot Bilgisi 1",t:"text",c:"s",max:10},
+  {k:"LOT2",h:"LOT2",tr:"Lot Bilgisi 2",t:"text",c:"s",max:10},
+  {k:"LENGTH",h:"LENGTH",tr:"Uzunluk (Boy)",t:"dec",c:"n",dp:3},
+  {k:"WIDTH",h:"WIDTH",tr:"Genişlik (En)",t:"dec",c:"n",dp:3},
+  {k:"HEIGHT",h:"HEIGHT",tr:"Yükseklik",t:"dec",c:"n",dp:3},
+  {k:"WEIGHT",h:"WEIGHT",tr:"Brüt Ağırlık",t:"dec",c:"n",dp:3}]}
+};
+const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const $=id=>document.getElementById(id);
+const orgSel=$("org"),info=$("info");
+
+function showTab(t){["p5","p8"].forEach(x=>{$("tab_"+x).classList.toggle("on",x===t);$("pane_"+x).classList.toggle("on",x===t);});}
+
+function tip(c){const a=[c.tr];
+ if(c.note)a.push(c.note);
+ a.push(c.req?"Zorunlu":"Boş bırakılabilir");
+ if(c.t==="sel")a.push("Listeden seçilir");
+ if(c.max)a.push("En çok "+c.max+" karakter");
+ if(c.t==="num")a.push("Yalnız tam sayı");
+ if(c.t==="dec")a.push("Sayı, ondalık ayıraç nokta"+(c.dp?", en çok "+c.dp+" ondalık":""));
+ return a.join(" • ");}
+
+function parseCSV(t){
+ t=t.replace(/^\ufeff/,"");
+ const first=t.split(/\r?\n/,1)[0];
+ const d=[";","\t",","].map(c=>[c,first.split(c).length]).sort((a,b)=>b[1]-a[1])[0][0];
+ const rows=[];let row=[],f="",q=false;
+ for(let i=0;i<t.length;i++){const ch=t[i];
+  if(q){if(ch=='"'){if(t[i+1]=='"'){f+='"';i++;}else q=false;}else f+=ch;}
+  else if(ch=='"')q=true;
+  else if(ch===d){row.push(f);f="";}
+  else if(ch=="\n"){row.push(f);rows.push(row);row=[];f="";}
+  else if(ch!="\r")f+=ch;}
+ if(f!==""||row.length){row.push(f);rows.push(row);}
+ return rows;}
+function build(rows){
+ const h=rows[0].map(x=>x.trim().toUpperCase());
+ const iO=h.indexOf("ORG_CODE"),iL=h.indexOf("LISTE"),iK=h.indexOf("KOD"),iA=h.indexOf("ACIKLAMA");
+ if([iO,iL,iK,iA].includes(-1))throw "Dosyada ORG_CODE, LISTE, KOD, ACIKLAMA kolonları bulunamadı.";
+ const D={},gen=[];
+ rows.slice(1).forEach(r=>{if(r.length<4)return;
+  const o=r[iO].trim(),l=r[iL].trim(),k=r[iK],a=(r[iA]||"").trim();
+  if(!o||!l)return;
+  if(l==="SEVK_GENEL"){gen.push([k,a]);return;}
+  D[o]=D[o]||{name:""};
+  if(l==="ORG"){D[o].name=a;return;}
+  (D[o][l]=D[o][l]||[]).push([k,a]);});
+ Object.values(D).forEach(x=>{const s=x.SEVKONCELIK||[],seen=new Set(s.map(v=>v[0]));
+  gen.forEach(v=>{if(!seen.has(v[0])){s.push(v);seen.add(v[0]);}});x.SEVKONCELIK=s;});
+ return D;}
+function applyData(D,stamp){
+ DATA=D;const cur=orgSel.value;orgSel.innerHTML="";
+ Object.keys(D).sort().forEach(o=>orgSel.add(new Option(o+" - "+D[o].name,o)));
+ if(cur&&D[cur])orgSel.value=cur;
+ info.textContent=`Listeler yüklü: ${Object.keys(D).length} proje (${stamp})`;
+ orgSel.onchange();}
+$("lf").onchange=e=>{
+ const file=e.target.files[0];if(!file)return;
+ const read=enc=>new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsText(file,enc);});
+ read("utf-8").then(t=>t.includes("\ufffd")?read("windows-1254"):t).then(t=>{
+  try{const D=build(parseCSV(t)),stamp=file.name+" – "+new Date().toLocaleString("tr-TR");
+   localStorage.setItem(KEY,JSON.stringify({D,stamp}));applyData(D,stamp);}
+  catch(err){alert(err);}});
+ e.target.value="";};
+
+function opts(c){const o=DATA[orgSel.value];const L=c.fix||(o&&o[c.l||c.k])||[];
+ return '<option value="">(boş)</option>'+L.map(([k,v])=>`<option value="${esc(k)}">${esc(k.trim()===""?"(boşluk)":k)}${v?" - "+esc(v):""}</option>`).join("");}
+function cell(c){const ti=` title="${esc(tip(c))}"`;
+ if(c.t==="sel")return `<select data-k="${c.k}"${ti}>${opts(c)}</select>`;
+ return `<input class="${c.c}" data-k="${c.k}"${ti} placeholder="${esc(c.tr)}" ${c.max?'maxlength="'+c.max+'"':''} ${(c.t==="num"||c.t==="dec")?'inputmode="decimal"':''}>`;}
+const tb=t=>$("tb_"+t);
+function addRow(t,vals){const tr=document.createElement("tr");
+ tr.innerHTML="<td></td>"+T[t].cols.map(c=>"<td>"+cell(c)+"</td>").join("")+`<td><button onclick="this.closest('tr').remove();renum('${t}')">Sil</button></td>`;
+ tb(t).appendChild(tr);if(vals)setVals(tr,vals);renum(t);return tr;}
+function getVals(tr){const o={};tr.querySelectorAll("[data-k]").forEach(e=>o[e.dataset.k]=e.value);return o;}
+function setVals(tr,o){tr.querySelectorAll("[data-k]").forEach(e=>{if(o[e.dataset.k]!==undefined)e.value=o[e.dataset.k];});}
+const isEmpty=tr=>!Object.values(getVals(tr)).some(x=>x!=="");
+function copyLast(t){const r=tb(t).lastElementChild;if(!r){addRow(t);return;}
+ const v=getVals(r);T[t].clear.forEach(k=>v[k]="");
+ const n=addRow(t,v);(n.querySelector(t==="p8"?'[data-k="UOM"]':"input")).focus();}
+function renum(t){[...tb(t).rows].forEach((r,i)=>r.cells[0].textContent=i+1);$("cnt_"+t).textContent=tb(t).rows.length+" satır";}
+function importFrom5(){
+ const have=new Set([...tb("p8").rows].map(tr=>getVals(tr).ARTICLE_CODE).filter(x=>x));
+ [...tb("p8").rows].forEach(tr=>{if(isEmpty(tr))tr.remove();});
+ let n=0;
+ [...tb("p5").rows].forEach(tr=>{const v=getVals(tr),code=v.ARTICLE_CODE.trim();
+  if(!code||have.has(code))return;have.add(code);n++;
+  addRow("p8",{ARTICLE_CODE:code,UOM:v.UOM,QUANTITY:"1",EAN:v.GTIN.trim()});});
+ renum("p8");$("msg_p8").textContent=n?"":"ALLP005'te aktarılacak yeni ürün yok.";}
+orgSel.onchange=()=>{["p5","p8"].forEach(t=>[...tb(t).rows].forEach(tr=>{const v=getVals(tr);
+ tr.querySelectorAll("select[data-k]").forEach(s=>{s.innerHTML=opts(T[t].cols.find(x=>x.k===s.dataset.k));});setVals(tr,v);}));};
+
+/* ---- Excel'den ürün yükleme ---- */
+async function readSheet(file){
+ if(/\.(csv|txt)$/i.test(file.name)){
+  const read=enc=>new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsText(file,enc);});
+  let t=await read("utf-8");if(t.includes("\ufffd"))t=await read("windows-1254");return parseCSV(t);}
+ if(typeof XLSX==="undefined")throw "Excel okuyucu yüklenemedi (internet bağlantısı gerekli). Dosyayı Excel'de CSV olarak kaydedip yükleyin.";
+ const wb=XLSX.read(await file.arrayBuffer(),{type:"array"}),ws=wb.Sheets[wb.SheetNames[0]];
+ return XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:""})
+  .map(r=>r.map(x=>typeof x==="number"?(Number.isInteger(x)?x.toFixed(0):String(x)):String(x)));}
+async function importExcel(t,inp){const file=inp.files[0];inp.value="";if(!file)return;
+ const m=$("msg_"+t),ok=$("ok_"+t);m.textContent="";ok.textContent="";
+ let rows;try{rows=await readSheet(file);}catch(e){m.textContent=String(e);return;}
+ rows=rows.filter(r=>r.some(x=>String(x).trim()!==""));
+ if(rows.length<2){m.textContent="Dosyada başlık satırı ve en az bir ürün satırı olmalı.";return;}
+ const h=rows[0].map(x=>String(x).trim().toUpperCase()),map=T[t].xl,idx={};
+ Object.keys(map).forEach(x=>idx[x]=h.indexOf(x));
+ if(idx.ARTICLE_CODE<0){m.textContent="Dosyanın başlık satırında ARTICLE_CODE kolonu bulunamadı.";return;}
+ const miss=Object.keys(map).filter(x=>idx[x]<0);
+ const ex={};
+ [...tb(t).rows].forEach(tr=>{if(isEmpty(tr)){tr.remove();return;}const c=getVals(tr).ARTICLE_CODE.trim();if(c&&!ex[c])ex[c]=tr;});
+ const seen=new Set(),dup=[];let add=0,upd=0;
+ rows.slice(1).forEach((r,i)=>{const code=String(r[idx.ARTICLE_CODE]||"").trim();if(!code)return;
+  if(seen.has(code)){dup.push(code+" (dosya satırı "+(i+2)+")");return;}seen.add(code);
+  const v={};Object.entries(map).forEach(([x,k])=>{if(idx[x]>=0)v[k]=String(r[idx[x]]??"").trim().replace(/[|\r\n\t]/g," ");});
+  if(ex[code]){setVals(ex[code],v);upd++;}else{addRow(t,v);add++;}});
+ renum(t);
+ ok.textContent=`${file.name}: ${add} ürün eklendi, ${upd} ürün güncellendi.`
+  +(miss.length?` Dosyada bulunmayan kolonlar: ${miss.join(", ")}.`:"")
+  +` Diğer alanları ilk satırda doldurup "İlk satırı tüm satırlara uygula"ya basın.`;
+ if(dup.length)m.textContent="Dosyada tekrar eden ürün kodları (ilk geçen satır alındı):\n"+dup.slice(0,20).join("\n")+(dup.length>20?`\n… ve ${dup.length-20} satır daha`:"");}
+function applyFirst(t){const rows=[...tb(t).rows].filter(tr=>!isEmpty(tr)),m=$("msg_"+t),ok=$("ok_"+t);
+ m.textContent="";ok.textContent="";
+ if(rows.length<2){m.textContent="Uygulamak için en az iki dolu satır olmalı.";return;}
+ const skip=new Set(["ARTICLE_CODE",...Object.values(T[t].xl)]),v0=getVals(rows[0]),v={};
+ T[t].cols.forEach(c=>{if(!skip.has(c.k)&&v0[c.k]!=="")v[c.k]=v0[c.k];});
+ const ks=Object.keys(v);
+ if(!ks.length){m.textContent="İlk satırda kopyalanacak alan yok. Ürün kodu ve Excel'den gelen alanlar dışındaki alanları ilk satırda doldurun.";return;}
+ const names=ks.map(k=>T[t].cols.find(c=>c.k===k).tr).join(", ");
+ if(!confirm(`İlk satırdaki ${ks.length} alan (${names}) diğer ${rows.length-1} satıra yazılsın mı?\nBu satırlardaki mevcut değerlerin üstüne yazılır.`))return;
+ rows.slice(1).forEach(tr=>setVals(tr,v));
+ ok.textContent=`${ks.length} alan ${rows.length-1} satıra kopyalandı (${names}). İlk satırda boş olan alanlar değiştirilmedi.`;}
+
+function collect(t){const out=[],errs=[],seen={},cols=T[t].cols;
+ [...tb(t).rows].forEach((tr,i)=>{tr.querySelectorAll(".err").forEach(e=>e.classList.remove("err"));
+  if(isEmpty(tr))return;const v=getVals(tr);
+  cols.forEach(c=>{const e=tr.querySelector(`[data-k="${c.k}"]`);let x=v[c.k];const nm=c.tr+" ("+c.h+")";
+   if(c.t!=="sel"){x=x.trim().replace(/[|\r\n\t]/g," ");v[c.k]=x;}
+   if(c.req&&x===""){e.classList.add("err");errs.push(`Satır ${i+1}: ${nm} zorunlu`);}
+   if(c.max&&x.length>c.max){e.classList.add("err");errs.push(`Satır ${i+1}: ${nm} en çok ${c.max} karakter (şu an ${x.length})`);}
+   if(c.t==="num"&&x&&!/^\d+$/.test(x)){e.classList.add("err");errs.push(`Satır ${i+1}: ${nm} yalnız tam sayı olmalı`);}
+   if(c.t==="dec"&&x){const re=c.dp?new RegExp("^\\d+(\\.\\d{1,"+c.dp+"})?$"):/^\d+(\.\d+)?$/;
+    if(!re.test(x)){e.classList.add("err");errs.push(`Satır ${i+1}: ${nm} sayı olmalı (ondalık ayıraç nokta${c.dp?", en çok "+c.dp+" ondalık":""})`);}}});
+  const key=T[t].uniq.map(k=>v[k]).join(" / ");
+  if(T[t].uniq.every(k=>v[k]!=="")){if(seen[key]){T[t].uniq.forEach(k=>tr.querySelector(`[data-k="${k}"]`).classList.add("err"));errs.push(`Satır ${i+1}: ${key} satır ${seen[key]} ile mükerrer`);}else seen[key]=i+1;}
+  out.push([orgSel.value,...cols.map(c=>v[c.k])]);});
+ return {out,errs};}
+function download(t,fmt){const m=$("msg_"+t);
+ if(!orgSel.value){m.textContent="Önce lookup dosyasını yükleyip ORG_CODE seçin.";return;}
+ const {out,errs}=collect(t);
+ if(!out.length){m.textContent="Dolu satır yok.";return;}
+ if(errs.length){m.textContent=errs.join("\n");return;}
+ m.textContent="";
+ const H=["ORG_CODE",...T[t].cols.map(c=>c.h)],d=new Date(),p=n=>String(n).padStart(2,"0");
+ const name=T[t].name+"_"+orgSel.value+"_"+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"_"+p(d.getHours())+p(d.getMinutes());
+ let blob;
+ if(fmt==="csv"){const q=s=>/[;"]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+  blob=new Blob(["\ufeff"+[H,...out].map(r=>r.map(q).join(";")).join("\r\n")],{type:"text/csv;charset=utf-8"});}
+ else{const td=s=>`<td style="mso-number-format:'\\@'">${esc(s)}</td>`;
+  const html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body><table><tr>'
+   +H.map(h=>"<th>"+esc(h)+"</th>").join("")+"</tr>"+out.map(r=>"<tr>"+r.map(td).join("")+"</tr>").join("")+"</table></body></html>";
+  blob=new Blob(["\ufeff"+html],{type:"application/vnd.ms-excel"});}
+ const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name+"."+(fmt==="csv"?"csv":"xls");
+ document.body.appendChild(a);a.click();a.remove();}
+
+["p5","p8"].forEach(t=>{$("hd_"+t).innerHTML="<th>#</th>"+T[t].cols.map(c=>
+ `<th title="${esc(tip(c))}">${esc(c.h)}${c.req?' <span class="req">*</span>':''}<span class="tr">${esc(c.tr)}</span></th>`).join("")+"<th></th>";
+ for(let i=0;i<5;i++)addRow(t);});
+try{const s=JSON.parse(localStorage.getItem(KEY)||"null");if(s)applyData(s.D,s.stamp);}catch(e){}
+</script>
+</body>
+</html>
